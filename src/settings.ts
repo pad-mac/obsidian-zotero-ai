@@ -1,9 +1,12 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 
 import { listModels } from "./anthropic";
+import { claudeVersion, findClaude } from "./claude-code";
 import type ZoteroAiPlugin from "./main";
 
 export interface ZoteroAiSettings {
+	/** API key (billed credits) or Claude Code signed in with the Claude plan. */
+	backend: "api" | "claude-code";
 	model: string;
 	/** Models offered in the chat's picker (from the API, or typed). */
 	models: string[];
@@ -19,9 +22,16 @@ export interface ZoteroAiSettings {
 	zoteroDataDir: string;
 	/** Attach the item of the active reader or source note on its own. */
 	followActive: boolean;
+	/** Claude Code: path to `claude` (empty: the usual install places, then PATH). */
+	claudePath: string;
+	/** Claude Code: "" (its default), an alias or a full model id. */
+	ccModel: string;
 }
 
+export const CC_MODELS = ["", "opus", "sonnet", "haiku", "fable"];
+
 export const DEFAULT_SETTINGS: ZoteroAiSettings = {
+	backend: "api",
 	model: "claude-sonnet-5-5",
 	models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
 	maxTokens: 8000,
@@ -33,6 +43,8 @@ export const DEFAULT_SETTINGS: ZoteroAiSettings = {
 	chatFolder: "AI chats",
 	zoteroDataDir: "",
 	followActive: true,
+	claudePath: "",
+	ccModel: "",
 };
 
 export const SECRET_ID = "zotero-ai-anthropic-key";
@@ -50,6 +62,55 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		const s = this.plugin.settings;
 		const save = () => this.plugin.saveSettings();
+
+		new Setting(containerEl)
+			.setName("Answer with")
+			.setDesc("API key: billed per use in the Claude Console. Claude Code: the claude command on this computer, signed in with your Claude plan; counts against the plan's usage limits. Can be switched per chat in the model menu.")
+			.addDropdown((d) =>
+				d
+					.addOption("api", "API key")
+					.addOption("claude-code", "Claude Code (subscription)")
+					.setValue(s.backend)
+					.onChange(async (v) => {
+						s.backend = v as ZoteroAiSettings["backend"];
+						await save();
+						this.display();
+					}),
+			);
+
+		if (s.backend === "claude-code") {
+			new Setting(containerEl)
+				.setName("Claude Code model")
+				.addDropdown((d) => {
+					for (const m of new Set([...CC_MODELS, s.ccModel])) d.addOption(m, m || "Claude Code's default");
+					d.setValue(s.ccModel).onChange(async (v) => {
+						s.ccModel = v;
+						await save();
+					});
+				});
+			new Setting(containerEl)
+				.setName("Path to claude")
+				.setDesc(`Empty: ${findClaude("")}. Install it in PowerShell with: irm https://claude.ai/install.ps1 | iex — then run "claude" once and sign in with your Claude account.`)
+				.addText((t) =>
+					t
+						.setPlaceholder(findClaude(""))
+						.setValue(s.claudePath)
+						.onChange(async (v) => {
+							s.claudePath = v.trim();
+							await save();
+						}),
+				)
+				.addButton((b) =>
+					b.setButtonText("Test").onClick(async () => {
+						try {
+							new Notice(`Found: ${await claudeVersion(s.claudePath)}`);
+						} catch (e) {
+							new Notice((e as Error).message, 10000);
+						}
+					}),
+				);
+			containerEl.createEl("h3", { text: "API key (other option)" });
+		}
 
 		new Setting(containerEl)
 			.setName("Anthropic API key")

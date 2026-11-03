@@ -12,6 +12,8 @@ import {
 import { PDFDocument } from "pdf-lib";
 
 import { ApiError, streamMessage, toBase64, type ApiMessage, type Block, type Usage } from "./anthropic";
+import { ClaudeCodeError, runClaudeCode } from "./claude-code";
+import { CC_MODELS } from "./settings";
 import { loadDocument, targetId, type LoadedDocument, type Target } from "./documents";
 import type ZoteroAiPlugin from "./main";
 import { ItemPicker } from "./picker";
@@ -47,7 +49,10 @@ const QUICK = [
 export class ChatView extends ItemView {
 	private docs: ContextDoc[] = [];
 	private messages: ChatMessage[] = [];
+	/** "api:<model id>" or "cc:<alias or id>" ("cc:" alone: Claude Code's default). */
 	private model: string;
+	/** The Claude Code session of this chat, and the documents it was given. */
+	private ccSession: { id: string; contextKey: string } | null = null;
 	private abort: AbortController | null = null;
 
 	private contextEl!: HTMLElement;
@@ -62,7 +67,8 @@ export class ChatView extends ItemView {
 		private plugin: ZoteroAiPlugin,
 	) {
 		super(leaf);
-		this.model = plugin.settings.model;
+		const s = plugin.settings;
+		this.model = s.backend === "claude-code" ? `cc:${s.ccModel}` : `api:${s.model}`;
 	}
 
 	getViewType() {
@@ -127,7 +133,14 @@ export class ChatView extends ItemView {
 		if (!this.modelSelect) return;
 		this.modelSelect.empty();
 		const s = this.plugin.settings;
-		for (const m of new Set([...s.models, s.model, this.model])) this.modelSelect.createEl("option", { text: m, value: m });
+		const api = this.modelSelect.createEl("optgroup", { attr: { label: "API key" } });
+		for (const m of new Set([...s.models, s.model])) api.createEl("option", { text: m, value: `api:${m}` });
+		const cc = this.modelSelect.createEl("optgroup", { attr: { label: "Claude Code (subscription)" } });
+		for (const m of new Set([...CC_MODELS, s.ccModel])) cc.createEl("option", { text: m ? `Claude Code · ${m}` : "Claude Code · default", value: `cc:${m}` });
+		if (![...this.modelSelect.options].some((o) => o.value === this.model)) {
+			const [kind, id] = splitChoice(this.model);
+			(kind === "api" ? api : cc).createEl("option", { text: id, value: this.model });
+		}
 		this.modelSelect.value = this.model;
 	}
 
@@ -344,6 +357,7 @@ export class ChatView extends ItemView {
 	private newChat() {
 		this.stop();
 		this.messages = [];
+		this.ccSession = null;
 		this.renderMessages();
 		this.setStatus("");
 	}
@@ -410,9 +424,10 @@ export class ChatView extends ItemView {
 		if (this.abort) return;
 		const text = (preset ?? this.inputEl.value).trim();
 		if (!text) return;
+		const [backend, modelId] = splitChoice(this.model);
 		const key = this.plugin.apiKey();
-		if (!key) {
-			new Notice("Add your Anthropic API key in the Zotero AI settings first.");
+		if (backend === "api" && !key) {
+			new Notice("Add your Anthropic API key in the Zotero AI settings first, or pick Claude Code in the model menu.");
 			return;
 		}
 		if (this.docs.some((d) => d.loading)) {
@@ -476,24 +491,28 @@ export class ChatView extends ItemView {
 			}, 80);
 		};
 		try {
-			const res = await streamMessage({
-				apiKey: key,
-				model: this.model,
-				maxTokens: this.plugin.settings.maxTokens,
-				system: this.systemPrompt(),
-				messages: apiMessages,
-				signal: this.abort.signal,
-				onText: (delta) => {
-					if (!answer.text) this.setStatus("");
-					answer.text += delta;
-					paint();
-				},
-			});
+			const onText = (delta: string) => {
+				if (!answer.text) this.setStatus("");
+				answer.text += delta;
+				paint();
+			};
+			const res =
+				backend === "api"
+					? await streamMessage({
+							apiKey: key,
+							model: modelId,
+							maxTokens: this.plugin.settings.maxTokens,
+							system: this.systemPrompt(),
+							messages: apiMessages,
+							signal: this.abort.signal,
+							onText,
+						})
+					: await this.askClaudeCode(modelId, context.blocks, text, onText, this.abort.signal);
 			answer.usage = res.usage;
 			if (res.stopReason === "max_tokens") answer.error = "The answer hit the length limit (settings → maximum answer length).";
 		} catch (e) {
 			if (this.abort?.signal.aborted) answer.error = "Stopped.";
-			else answer.error = e instanceof ApiError ? e.message : `Request failed: ${(e as Error).message}`;
+			else answer.error = e instanceof ApiError || e instanceof ClaudeCodeError ? e.message : `Request failed: ${(e as Error).message}`;
 			// A failed first question leaves nothing worth keeping in the history.
 			if (!answer.text) {
 				this.messages.pop();
@@ -508,6 +527,47 @@ export class ChatView extends ItemView {
 			this.setStatus("");
 			this.renderMessages();
 		}
+	}
+
+	/** The documents a Claude Code session was started with. */
+	private contextKey(): string {
+		return this.docs
+			.filter((d) => d.doc)
+			.map((d) => `${d.doc!.id}|${d.mode}|${d.pages}`)
+			.join(";");
+	}
+
+	/**
+	 * One question through Claude Code. The first question of a session
+	 * carries the documents; later ones continue it. When the documents
+	 * changed (or the chat came from the API), a new session starts with the
+	 * documents and the conversation so far as text.
+	 */
+	private async askClaudeCode(model: string, blocks: Block[], question: string, onText: (d: string) => void, signal: AbortSignal) {
+		const key = this.contextKey();
+		const resume = this.ccSession && this.ccSession.contextKey === key ? this.ccSession.id : undefined;
+		let content: Block[];
+		if (resume) {
+			content = [{ type: "text", text: question }];
+		} else {
+			const earlier = this.messages.slice(0, -2);
+			const transcript = earlier.length
+				? [{ type: "text" as const, text: `<earlier_conversation>\n${earlier.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`).join("\n\n")}\n</earlier_conversation>` }]
+				: [];
+			content = [...blocks, ...transcript, { type: "text", text: question }];
+		}
+		this.setStatus("Starting Claude Code…");
+		const res = await runClaudeCode({
+			claudePath: this.plugin.settings.claudePath,
+			model,
+			system: this.systemPrompt(),
+			content,
+			resume,
+			signal,
+			onText,
+		});
+		this.ccSession = res.sessionId ? { id: res.sessionId, contextKey: key } : null;
+		return res;
 	}
 
 	/* ------------------------------- export ------------------------------ */
@@ -528,7 +588,7 @@ export class ChatView extends ItemView {
 		const lines = [
 			"---",
 			`created: ${window.moment().format("YYYY-MM-DDTHH:mm")}`,
-			`model: ${this.model}`,
+			`model: ${splitChoice(this.model)[0] === "cc" ? `Claude Code ${splitChoice(this.model)[1] || "default"}` : splitChoice(this.model)[1]}`,
 			sources.length ? `sources:\n${sources.map((x) => `  - ${x}`).join("\n")}` : "sources: []",
 			"tags: [ai-chat]",
 			"---",
@@ -549,6 +609,12 @@ export class ChatView extends ItemView {
 		menu.addItem((i) => i.setTitle("Save chat as note").setIcon("file-down").onClick(() => void this.saveAsNote()));
 		menu.addItem((i) => i.setTitle("New chat").setIcon("square-pen").onClick(() => this.newChat()));
 	}
+}
+
+function splitChoice(choice: string): ["api" | "cc", string] {
+	const i = choice.indexOf(":");
+	const kind = choice.slice(0, i) === "cc" ? "cc" : "api";
+	return [kind, choice.slice(i + 1)];
 }
 
 function fmtK(n: number): string {

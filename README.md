@@ -3,9 +3,18 @@
 An Obsidian chat pane for asking Claude about the PDFs and books in your
 Zotero library. It works alongside **ZotFlow Evo** (`pad-mac/zotflow-evo`):
 it reads ZotFlow's database for the items and your annotations, and finds the
-files on this computer by itself. Claude Desktop does not need to run. You
-need an Anthropic API key, which is billed per use and separately from a
-Claude subscription.
+files on this computer by itself. Claude Desktop does not need to run.
+
+Two ways to get answers, switchable per chat in the model menu:
+
+- **API key:** billed per use in the Claude Console, separately from a
+  Claude plan (Max and Ultra include monthly API credits).
+- **Claude Code (subscription):** the `claude` command on this computer,
+  signed in with your Claude plan. This counts against the plan's usage
+  limits, not credits. The copy of Claude Code inside Claude Desktop can't
+  be used for this. Install the command once (PowerShell:
+  `irm https://claude.ai/install.ps1 | iex`), then run `claude` once and
+  sign in with your Claude account.
 
 Desktop only, because it reads files from Zotero's folders.
 
@@ -31,6 +40,26 @@ Desktop only, because it reads files from Zotero's folders.
 - Documents are marked for prompt caching, so follow-up questions within a few
   minutes are much cheaper. Each answer shows its tokens (in, cached, out) on
   hover.
+
+## Claude Code backend
+
+- **One process per question.** The first question sends the documents.
+  Later questions continue the same Claude Code session (`--resume`), so
+  Claude Code's own prompt caching applies.
+- **If you add documents or change pages mid-chat,** a new session starts.
+  It gets the documents and the conversation so far.
+- **Claude Code runs as a plain reader, not an agent:**
+  - `--tools ""`, `--strict-mcp-config`, `--setting-sources ""` and
+    `--disable-slash-commands`: no tools, no MCP servers, no settings
+    files, no commands.
+  - Its system prompt is replaced by the plugin's.
+  - It runs in a temporary folder, so your vault's or projects' `CLAUDE.md`
+    files are not read.
+- `ANTHROPIC_API_KEY` is removed from Claude Code's environment; with that
+  variable set it would bill the key instead of the plan.
+- **No answer length limit** in this mode, and how cached tokens count
+  against plan limits is not documented by Anthropic.
+- Settings → "Path to claude" → **Test** shows whether the plugin finds it.
 
 ## Where the text comes from
 
