@@ -35,6 +35,14 @@ Desktop only, because it reads files from Zotero's folders.
   - Your Zotero highlights and comments are sent along (setting).
 - Claude cites pages as `[p. 12]`. They become links that open ZotFlow's
   reader at that page, in the pane and in saved notes.
+- **Chats are kept**, each as a JSON file in the plugin's folder
+  (`.obsidian/plugins/zotero-ai/chats/`), saved after every answer. The
+  clock icon lists them; "+" starts a new chat and the old one stays in the
+  history. The pane reopens the last chat after a restart. "Recover Claude
+  Code chats…" reads back chats from Claude Code's own session files
+  (`~/.claude/projects/*obsidian-zotero-ai*/`), including ones from before
+  the history existed. Those can be continued, since the session holds the
+  documents.
 - **Save chat as note** writes the chat into the chat folder. The
   frontmatter links the sources' `@citekey` notes.
 - Documents are marked for prompt caching, so follow-up questions within a few
@@ -106,7 +114,6 @@ If ZotFlow changes any of these, this plugin has to follow.
 - Files only reachable over WebDAV that were never opened in ZotFlow (no
   download from here).
 - Text of EPUBs and snapshots beyond Zotero's full-text cache.
-- Chats are not kept across restarts unless saved as notes.
 
 ## Develop
 

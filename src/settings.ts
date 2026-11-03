@@ -26,6 +26,8 @@ export interface ZoteroAiSettings {
 	claudePath: string;
 	/** Claude Code: "" (its default), an alias or a full model id. */
 	ccModel: string;
+	/** The chat the pane shows on opening. */
+	lastChatId: string;
 }
 
 export const CC_MODELS = ["", "opus", "sonnet", "haiku", "fable"];
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: ZoteroAiSettings = {
 	followActive: true,
 	claudePath: "",
 	ccModel: "",
+	lastChatId: "",
 };
 
 export const SECRET_ID = "zotero-ai-anthropic-key";

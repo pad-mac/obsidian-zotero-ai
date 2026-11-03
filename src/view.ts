@@ -16,6 +16,7 @@ import { ClaudeCodeError, runClaudeCode } from "./claude-code";
 import { CC_MODELS } from "./settings";
 import { loadDocument, targetId, type LoadedDocument, type Target } from "./documents";
 import type ZoteroAiPlugin from "./main";
+import { chatTitle, listClaudeCodeSessions, newChatId, readClaudeCodeSession, type ChatRecord } from "./history";
 import { ItemPicker } from "./picker";
 import { documentText, estimateTokens, labelRuns, linkCitations, selectPages, type LinkTarget } from "./text";
 
@@ -53,6 +54,8 @@ export class ChatView extends ItemView {
 	private model: string;
 	/** The Claude Code session of this chat, and the documents it was given. */
 	private ccSession: { id: string; contextKey: string } | null = null;
+	private chatId = newChatId();
+	private created = Date.now();
 	private abort: AbortController | null = null;
 
 	private contextEl!: HTMLElement;
@@ -91,8 +94,9 @@ export class ChatView extends ItemView {
 		this.fillModels();
 		this.modelSelect.onchange = () => (this.model = this.modelSelect.value);
 		head.createDiv("zai-spacer");
+		this.iconButton(head, "history", "Chat history", (e) => void this.showHistory(e));
 		this.iconButton(head, "file-down", "Save chat as note", () => void this.saveAsNote());
-		this.iconButton(head, "square-pen", "New chat", () => this.newChat());
+		this.iconButton(head, "plus", "New chat (this one stays in the history)", () => this.newChat());
 
 		this.contextEl = root.createDiv("zai-context");
 		this.listEl = root.createDiv("zai-list");
@@ -118,7 +122,10 @@ export class ChatView extends ItemView {
 
 		this.renderContext();
 		this.renderMessages();
-		if (this.plugin.settings.followActive) void this.followActive();
+		const last = this.plugin.settings.lastChatId;
+		const rec = last ? await this.plugin.chats.load(last) : null;
+		if (rec && rec.messages.length) await this.openRecord(rec);
+		else if (this.plugin.settings.followActive) void this.followActive();
 	}
 
 	async onClose() {
@@ -144,7 +151,7 @@ export class ChatView extends ItemView {
 		this.modelSelect.value = this.model;
 	}
 
-	private iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void) {
+	private iconButton(parent: HTMLElement, icon: string, label: string, onClick: (e: MouseEvent) => void) {
 		const b = parent.createDiv({ cls: "clickable-icon", attr: { "aria-label": label } });
 		setIcon(b, icon);
 		b.onclick = onClick;
@@ -159,7 +166,7 @@ export class ChatView extends ItemView {
 	/* ------------------------------ context ------------------------------ */
 
 	/** Attach a document (no-op if it is attached already). */
-	async attach(target: Target, auto = false) {
+	async attach(target: Target, auto = false, restore?: { mode: "text" | "pdf"; pages: string }) {
 		const id = targetId(target);
 		if (this.docs.some((d) => targetId(d.target) === id || d.doc?.id === id)) return;
 		const entry: ContextDoc = {
@@ -167,8 +174,8 @@ export class ChatView extends ItemView {
 			doc: null,
 			loading: "Loading…",
 			error: null,
-			mode: this.plugin.settings.defaultMode,
-			pages: "",
+			mode: restore?.mode ?? this.plugin.settings.defaultMode,
+			pages: restore?.pages ?? "",
 			auto,
 		};
 		this.docs.push(entry);
@@ -181,7 +188,7 @@ export class ChatView extends ItemView {
 			// The same file reached through its parent item and through itself.
 			if (this.docs.some((d) => d !== entry && d.doc?.id === entry.doc?.id)) {
 				this.docs.remove(entry);
-			} else if (entry.doc.looksScanned && entry.doc.bytes) {
+			} else if (!restore && entry.doc.looksScanned && entry.doc.bytes) {
 				entry.mode = "pdf";
 			}
 		} catch (e) {
@@ -356,10 +363,128 @@ export class ChatView extends ItemView {
 
 	private newChat() {
 		this.stop();
+		const hadMessages = this.messages.length > 0;
+		if (hadMessages) void this.persist();
 		this.messages = [];
 		this.ccSession = null;
+		this.chatId = newChatId();
+		this.created = Date.now();
 		this.renderMessages();
 		this.setStatus("");
+		if (hadMessages) new Notice("New chat. The previous one is in the history (clock icon).");
+	}
+
+	/* ------------------------------ history ------------------------------ */
+
+	private record(): ChatRecord {
+		const firstDoc = this.docs.find((d) => d.doc)?.doc?.title ?? "";
+		return {
+			id: this.chatId,
+			created: this.created,
+			updated: Date.now(),
+			title: chatTitle(this.messages, firstDoc),
+			model: this.model,
+			docs: this.docs.filter((d) => !d.error).map((d) => ({ target: d.target, mode: d.mode, pages: d.pages })),
+			messages: this.messages.map((m) => ({ role: m.role, text: m.text, usage: m.usage, error: m.error })),
+			ccSession: this.ccSession,
+		};
+	}
+
+	/** Saved after every answer; a chat without messages is not kept. */
+	private async persist() {
+		if (this.messages.length === 0) return;
+		try {
+			await this.plugin.chats.save(this.record());
+			if (this.plugin.settings.lastChatId !== this.chatId) {
+				this.plugin.settings.lastChatId = this.chatId;
+				await this.plugin.saveSettings();
+			}
+		} catch (e) {
+			console.warn("[Zotero AI] Could not save the chat", e);
+		}
+	}
+
+	private async openRecord(rec: ChatRecord) {
+		this.stop();
+		this.chatId = rec.id;
+		this.created = rec.created;
+		this.model = rec.model || this.model;
+		this.fillModels();
+		this.messages = rec.messages.map((m) => ({ ...m }));
+		this.ccSession = rec.ccSession;
+		this.docs = [];
+		this.renderContext();
+		this.renderMessages();
+		for (const d of rec.docs) await this.attach(d.target, false, { mode: d.mode, pages: d.pages });
+		// The citation links need the documents' page labels.
+		this.renderMessages();
+		if (this.plugin.settings.lastChatId !== rec.id) {
+			this.plugin.settings.lastChatId = rec.id;
+			await this.plugin.saveSettings();
+		}
+	}
+
+	private async showHistory(e: MouseEvent) {
+		const menu = new Menu();
+		const chats = (await this.plugin.chats.list()).slice(0, 30);
+		if (chats.length === 0) menu.addItem((i) => i.setTitle("No saved chats yet").setDisabled(true));
+		for (const c of chats) {
+			menu.addItem((i) =>
+				i
+					.setTitle(`${c.title}  ·  ${window.moment(c.updated).fromNow()}`)
+					.setChecked(c.id === this.chatId)
+					.onClick(async () => {
+						if (c.id === this.chatId) return;
+						await this.persist();
+						const rec = await this.plugin.chats.load(c.id);
+						if (rec) await this.openRecord(rec);
+					}),
+			);
+		}
+		menu.addSeparator();
+		menu.addItem((i) =>
+			i.setTitle("Recover Claude Code chats…").setIcon("rotate-ccw").onClick(() => void this.recoverClaudeCode()),
+		);
+		if (this.messages.length) {
+			menu.addItem((i) =>
+				i.setTitle("Delete this chat").setIcon("trash-2").onClick(async () => {
+					await this.plugin.chats.remove(this.chatId);
+					this.messages = [];
+					this.ccSession = null;
+					this.chatId = newChatId();
+					this.renderMessages();
+				}),
+			);
+		}
+		menu.showAtMouseEvent(e);
+	}
+
+	/** Chats that ran through Claude Code: its own session files, turned into history entries. */
+	private async recoverClaudeCode() {
+		const known = new Set(
+			(await Promise.all((await this.plugin.chats.list()).map((c) => this.plugin.chats.load(c.id))))
+				.map((r) => r?.ccSession?.id)
+				.filter(Boolean),
+		);
+		const sessions = listClaudeCodeSessions().filter((s) => !known.has(s.id));
+		let added = 0;
+		for (const s of sessions) {
+			const messages = readClaudeCodeSession(s.file);
+			if (messages.length === 0) continue;
+			await this.plugin.chats.save({
+				id: newChatId(),
+				created: s.updated,
+				updated: s.updated,
+				title: chatTitle(messages, "Claude Code chat"),
+				model: "cc:",
+				docs: [],
+				messages,
+				// The session holds the documents: questions can go on in it.
+				ccSession: { id: s.id, contextKey: "" },
+			});
+			added++;
+		}
+		new Notice(added ? `${added} Claude Code chat${added === 1 ? "" : "s"} recovered: see the history.` : "No Claude Code chats found that are not in the history already.");
 	}
 
 	private setStatus(text: string) {
@@ -526,6 +651,7 @@ export class ChatView extends ItemView {
 			this.sendBtn.setAttr("aria-label", "Send");
 			this.setStatus("");
 			this.renderMessages();
+			void this.persist();
 		}
 	}
 

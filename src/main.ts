@@ -1,17 +1,20 @@
 import { Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 
 import type { Target } from "./documents";
+import { ChatStore } from "./history";
 import { DEFAULT_SETTINGS, SECRET_ID, ZoteroAiSettingTab, type ZoteroAiSettings } from "./settings";
 import { CHAT_VIEW, ChatView } from "./view";
 import { closeDb, LOCAL_READER_VIEW, READER_VIEW } from "./zotflow";
 
 export default class ZoteroAiPlugin extends Plugin {
 	settings!: ZoteroAiSettings;
+	chats!: ChatStore;
 	/** The last Zotero item or PDF that was active (the chat pane itself is not). */
 	private lastTarget: Target | null = null;
 
 	async onload() {
 		await this.loadSettings();
+		this.chats = new ChatStore(this.app, `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/chats`);
 		this.registerView(CHAT_VIEW, (leaf) => new ChatView(leaf, this));
 		this.addSettingTab(new ZoteroAiSettingTab(this.app, this));
 
