@@ -40,6 +40,12 @@ interface ChatMessage {
 	error?: string;
 }
 
+const LENGTH = {
+	short: "Keep answers short: a few sentences, or at most five bullet points, about 150 words. No introduction, no recap of the question, no closing summary or offer of more help. Go longer only when the question asks for detail or a full summary.",
+	medium: "Keep answers to the point: about 300 words unless the question needs more. No introduction and no closing summary.",
+	detailed: "Answer thoroughly, with the structure and detail the question deserves.",
+} as const;
+
 const QUICK = [
 	{ label: "Summarize", prompt: "Summarize this text: its question, main argument and structure, chapter by chapter where there are chapters, with page references." },
 	{ label: "Argument", prompt: "Reconstruct the central argument step by step: claims, evidence, and the positions it argues against. Cite pages." },
@@ -489,7 +495,8 @@ export class ChatView extends ItemView {
 			`Cite the pages you rely on as [p. 12] (a range: [pp. 12–14]). With more than one document, put the document number first: [2: p. 12]. Always use the printed page label.`,
 			"Base your answers on the documents. When something is not in them, say so instead of filling the gap from general knowledge; mark clearly where you add outside knowledge. Quote exactly and sparingly.",
 			"<my_annotations> holds the user's own highlights and comments in Zotero.",
-			`Answer in ${s.language}. Use Markdown; keep it concise unless asked for detail.`,
+			`Answer in ${s.language}. Use Markdown.`,
+			LENGTH[s.answerLength],
 			s.customInstructions.trim(),
 		]
 			.filter(Boolean)

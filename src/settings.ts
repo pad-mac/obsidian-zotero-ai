@@ -17,6 +17,8 @@ export interface ZoteroAiSettings {
 	/** Above this many characters of context, ask before sending. */
 	confirmAboveChars: number;
 	language: string;
+	/** How long answers should be: told to Claude in the system prompt (both backends). */
+	answerLength: "short" | "medium" | "detailed";
 	customInstructions: string;
 	chatFolder: string;
 	zoteroDataDir: string;
@@ -43,6 +45,7 @@ export const DEFAULT_SETTINGS: ZoteroAiSettings = {
 	includeAnnotations: true,
 	confirmAboveChars: 600_000,
 	language: "the language of my question",
+	answerLength: "short",
 	customInstructions: "",
 	chatFolder: "AI chats",
 	zoteroDataDir: "",
@@ -68,10 +71,14 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		const s = this.plugin.settings;
 		const save = () => this.plugin.saveSettings();
+		const cc = s.backend === "claude-code";
+
+		/* ---------------------------- Backend ---------------------------- */
+		new Setting(containerEl).setName("Backend").setHeading();
 
 		new Setting(containerEl)
 			.setName("Answer with")
-			.setDesc("API key: billed per use in the Claude Console. Claude Code: the claude command on this computer, signed in with your Claude plan; counts against the plan's usage limits. Can be switched per chat in the model menu.")
+			.setDesc("API key: billed per use in the Claude Console. Claude Code: the claude command on this computer, signed in with your Claude plan; counts against the plan's usage limits.")
 			.addDropdown((d) =>
 				d
 					.addOption("api", "API key")
@@ -84,19 +91,17 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		if (s.backend === "claude-code") {
-			new Setting(containerEl)
-				.setName("Claude Code model")
-				.addDropdown((d) => {
-					for (const m of new Set([...CC_MODELS, s.ccModel])) d.addOption(m, m || "Claude Code's default");
-					d.setValue(s.ccModel).onChange(async (v) => {
-						s.ccModel = v;
-						await save();
-					});
+		if (cc) {
+			new Setting(containerEl).setName("Model").addDropdown((d) => {
+				for (const m of new Set([...CC_MODELS, s.ccModel])) d.addOption(m, m || "Claude Code's default");
+				d.setValue(s.ccModel).onChange(async (v) => {
+					s.ccModel = v;
+					await save();
 				});
+			});
 			new Setting(containerEl)
 				.setName("Path to claude")
-				.setDesc(`Empty: ${findClaude("")}. Install it in PowerShell with: irm https://claude.ai/install.ps1 | iex — then run "claude" once and sign in with your Claude account.`)
+				.setDesc(`Empty: ${findClaude("")}. Install in PowerShell with: irm https://claude.ai/install.ps1 | iex — then run claude once and sign in with your Claude account.`)
 				.addText((t) =>
 					t
 						.setPlaceholder(findClaude(""))
@@ -115,58 +120,98 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 						}
 					}),
 				);
-			containerEl.createEl("h3", { text: "API key (other option)" });
+		} else {
+			new Setting(containerEl)
+				.setName("Anthropic API key")
+				.setDesc("Kept in Obsidian's secret storage, not in data.json.")
+				.addText((t) => {
+					t.inputEl.type = "password";
+					t.setPlaceholder("sk-ant-…")
+						.setValue(this.plugin.apiKey())
+						.onChange((v) => this.plugin.setApiKey(v.trim()));
+				});
+			new Setting(containerEl)
+				.setName("Model")
+				.addDropdown((d) => {
+					for (const m of new Set([...s.models, s.model])) d.addOption(m, m);
+					d.setValue(s.model).onChange(async (v) => {
+						s.model = v;
+						await save();
+					});
+				})
+				.addButton((b) =>
+					b.setButtonText("Load from API").onClick(async () => {
+						const key = this.plugin.apiKey();
+						if (!key) return void new Notice("Enter the API key first.");
+						try {
+							const models = await listModels(key);
+							s.models = models.map((m) => m.id);
+							if (!s.models.includes(s.model) && s.models[0]) s.model = s.models[0];
+							await save();
+							new Notice(`${models.length} models loaded.`);
+							this.display();
+						} catch (e) {
+							new Notice(`Could not load models: ${(e as Error).message}`);
+						}
+					}),
+				);
+			new Setting(containerEl)
+				.setName("Hard limit per answer")
+				.setDesc("Output tokens; an answer that reaches it is cut off mid-sentence. For shorter answers use Answer length below.")
+				.addText((t) =>
+					t.setValue(String(s.maxTokens)).onChange(async (v) => {
+						const n = parseInt(v, 10);
+						if (n > 0) {
+							s.maxTokens = n;
+							await save();
+						}
+					}),
+				);
 		}
 
+		/* ---------------------------- Answers ---------------------------- */
 		new Setting(containerEl)
-			.setName("Anthropic API key")
-			.setDesc("Kept in Obsidian's secret storage, not in data.json. Billed per use on console.anthropic.com, separately from a Claude subscription.")
-			.addText((t) => {
-				t.inputEl.type = "password";
-				t.setPlaceholder("sk-ant-…")
-					.setValue(this.plugin.apiKey())
-					.onChange((v) => this.plugin.setApiKey(v.trim()));
-			});
+			.setName("Answers")
+			.setDesc("Apply to both backends, from the next question on.")
+			.setHeading();
 
 		new Setting(containerEl)
-			.setName("Model")
-			.setDesc("Default model for new chats; the chat pane can switch.")
-			.addDropdown((d) => {
-				for (const m of new Set([...s.models, s.model])) d.addOption(m, m);
-				d.setValue(s.model).onChange(async (v) => {
-					s.model = v;
+			.setName("Answer length")
+			.setDesc("Short: a few sentences or a handful of bullets. Asking for more in a question still works.")
+			.addDropdown((d) =>
+				d
+					.addOption("short", "Short")
+					.addOption("medium", "Medium")
+					.addOption("detailed", "Detailed")
+					.setValue(s.answerLength)
+					.onChange(async (v) => {
+						s.answerLength = v as ZoteroAiSettings["answerLength"];
+						await save();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Answer language")
+			.addText((t) =>
+				t.setValue(s.language).onChange(async (v) => {
+					s.language = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Custom instructions")
+			.setDesc("Added to the instructions Claude gets (your field, how you want summaries, citation style …).")
+			.addTextArea((t) => {
+				t.inputEl.rows = 5;
+				t.setValue(s.customInstructions).onChange(async (v) => {
+					s.customInstructions = v;
 					await save();
 				});
-			})
-			.addButton((b) =>
-				b.setButtonText("Load from API").onClick(async () => {
-					const key = this.plugin.apiKey();
-					if (!key) return void new Notice("Enter the API key first.");
-					try {
-						const models = await listModels(key);
-						s.models = models.map((m) => m.id);
-						if (!s.models.includes(s.model) && s.models[0]) s.model = s.models[0];
-						await save();
-						new Notice(`${models.length} models loaded.`);
-						this.display();
-					} catch (e) {
-						new Notice(`Could not load models: ${(e as Error).message}`);
-					}
-				}),
-			);
+			});
 
-		new Setting(containerEl)
-			.setName("Maximum answer length")
-			.setDesc("Output tokens per answer.")
-			.addText((t) =>
-				t.setValue(String(s.maxTokens)).onChange(async (v) => {
-					const n = parseInt(v, 10);
-					if (n > 0) {
-						s.maxTokens = n;
-						await save();
-					}
-				}),
-			);
+		/* --------------------------- Documents --------------------------- */
+		new Setting(containerEl).setName("Documents").setHeading();
 
 		new Setting(containerEl)
 			.setName("Send documents as")
@@ -216,24 +261,20 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Answer language")
+			.setName("Zotero data folder")
+			.setDesc("Where Zotero keeps its storage folder. Empty: ZotFlow Evo's setting, else ~/Zotero.")
 			.addText((t) =>
-				t.setValue(s.language).onChange(async (v) => {
-					s.language = v;
-					await save();
-				}),
+				t
+					.setPlaceholder("~/Zotero")
+					.setValue(s.zoteroDataDir)
+					.onChange(async (v) => {
+						s.zoteroDataDir = v.trim();
+						await save();
+					}),
 			);
 
-		new Setting(containerEl)
-			.setName("Custom instructions")
-			.setDesc("Added to the system prompt (your field, how you want summaries, citation style …).")
-			.addTextArea((t) => {
-				t.inputEl.rows = 5;
-				t.setValue(s.customInstructions).onChange(async (v) => {
-					s.customInstructions = v;
-					await save();
-				});
-			});
+		/* ------------------------------ Pane ----------------------------- */
+		new Setting(containerEl).setName("Pane").setHeading();
 
 		new Setting(containerEl)
 			.setName("Hide the tab bar above the chat")
@@ -247,24 +288,12 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Folder for saved chats")
+			.setDesc("Where \"Save chat as note\" writes.")
 			.addText((t) =>
 				t.setValue(s.chatFolder).onChange(async (v) => {
 					s.chatFolder = v.trim();
 					await save();
 				}),
-			);
-
-		new Setting(containerEl)
-			.setName("Zotero data folder")
-			.setDesc("Where Zotero keeps its storage folder. Empty: ZotFlow Evo's setting, else ~/Zotero.")
-			.addText((t) =>
-				t
-					.setPlaceholder("~/Zotero")
-					.setValue(s.zoteroDataDir)
-					.onChange(async (v) => {
-						s.zoteroDataDir = v.trim();
-						await save();
-					}),
 			);
 	}
 }

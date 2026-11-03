@@ -1,6 +1,6 @@
 {
   "name": "obsidian-zotero-ai",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Chat with Claude about the PDFs and books in your Zotero library (via ZotFlow Evo).",
   "main": "main.js",
   "type": "module",

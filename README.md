@@ -98,6 +98,9 @@ A PDF with little or no text layer (a scan) is sent as PDF automatically.
 
 ## Settings
 
+- **Answer length** (short / medium / detailed), answer language and custom
+  instructions go into the instructions Claude gets, for both backends.
+  "Short" is the default.
 - **API key**: kept in Obsidian's secret storage, not in `data.json`.
 - **Model**: "Load from API" fetches the models your key can use.
 - Also: maximum answer length, default Text/PDF, annotations on/off, follow

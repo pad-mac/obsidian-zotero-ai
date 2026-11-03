@@ -95,6 +95,8 @@ export function claudeArgs(req: Pick<ClaudeCodeRequest, "model" | "system" | "re
 		"--setting-sources", "",
 		"--disable-slash-commands",
 		"--permission-prompts", "none",
+		// Settings changes (length, language, instructions) apply to a running chat too.
+		"--system-prompt-snapshot", "off",
 		"--system-prompt", req.system,
 	];
 	if (req.model.trim()) args.push("--model", req.model.trim());
