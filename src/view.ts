@@ -17,7 +17,7 @@ import { CC_MODELS } from "./settings";
 import { loadDocument, targetId, type LoadedDocument, type Target } from "./documents";
 import type ZoteroAiPlugin from "./main";
 import { chatTitle, listClaudeCodeSessions, newChatId, readClaudeCodeSession, type ChatRecord } from "./history";
-import { ItemPicker } from "./picker";
+import { HistoryPicker, ItemPicker } from "./picker";
 import { documentText, estimateTokens, labelRuns, linkCitations, selectPages, type LinkTarget } from "./text";
 
 export const CHAT_VIEW = "zotero-ai-chat";
@@ -50,8 +50,11 @@ const QUICK = [
 export class ChatView extends ItemView {
 	private docs: ContextDoc[] = [];
 	private messages: ChatMessage[] = [];
-	/** "api:<model id>" or "cc:<alias or id>" ("cc:" alone: Claude Code's default). */
-	private model: string;
+	/** "api:<model id>" or "cc:<alias or id>" ("cc:" alone: Claude Code's default), from the settings. */
+	private get model(): string {
+		const s = this.plugin.settings;
+		return s.backend === "claude-code" ? `cc:${s.ccModel}` : `api:${s.model}`;
+	}
 	/** The Claude Code session of this chat, and the documents it was given. */
 	private ccSession: { id: string; contextKey: string } | null = null;
 	private chatId = newChatId();
@@ -63,15 +66,13 @@ export class ChatView extends ItemView {
 	private inputEl!: HTMLTextAreaElement;
 	private sendBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
-	private modelSelect!: HTMLSelectElement;
 
 	constructor(
 		leaf: WorkspaceLeaf,
 		private plugin: ZoteroAiPlugin,
 	) {
 		super(leaf);
-		const s = plugin.settings;
-		this.model = s.backend === "claude-code" ? `cc:${s.ccModel}` : `api:${s.model}`;
+
 	}
 
 	getViewType() {
@@ -89,14 +90,15 @@ export class ChatView extends ItemView {
 		root.empty();
 		root.addClass("zai");
 
-		const head = root.createDiv("zai-head");
-		this.modelSelect = head.createEl("select", { cls: "dropdown zai-model" });
-		this.fillModels();
-		this.modelSelect.onchange = () => (this.model = this.modelSelect.value);
-		head.createDiv("zai-spacer");
-		this.iconButton(head, "history", "Chat history", (e) => void this.showHistory(e));
-		this.iconButton(head, "file-down", "Save chat as note", () => void this.saveAsNote());
-		this.iconButton(head, "plus", "New chat (this one stays in the history)", () => this.newChat());
+		// No header: commands and this right-click menu instead.
+		root.addEventListener("contextmenu", (e) => {
+			if ((e.target as HTMLElement).closest("textarea, input, a")) return;
+			if (window.getSelection()?.toString()) return;
+			e.preventDefault();
+			const menu = new Menu();
+			this.addChatMenuItems(menu);
+			menu.showAtMouseEvent(e);
+		});
 
 		this.contextEl = root.createDiv("zai-context");
 		this.listEl = root.createDiv("zai-list");
@@ -122,8 +124,14 @@ export class ChatView extends ItemView {
 
 		this.renderContext();
 		this.renderMessages();
+		// Chats Claude Code holds but the history does not (e.g. from before it existed).
+		await this.recoverClaudeCode(true);
 		const last = this.plugin.settings.lastChatId;
-		const rec = last ? await this.plugin.chats.load(last) : null;
+		let rec = last ? await this.plugin.chats.load(last) : null;
+		if (!last) {
+			const newest = (await this.plugin.chats.list())[0];
+			if (newest) rec = await this.plugin.chats.load(newest.id);
+		}
 		if (rec && rec.messages.length) await this.openRecord(rec);
 		else if (this.plugin.settings.followActive) void this.followActive();
 	}
@@ -136,27 +144,8 @@ export class ChatView extends ItemView {
 		window.setTimeout(() => this.inputEl?.focus(), 0);
 	}
 
-	fillModels() {
-		if (!this.modelSelect) return;
-		this.modelSelect.empty();
-		const s = this.plugin.settings;
-		const api = this.modelSelect.createEl("optgroup", { attr: { label: "API key" } });
-		for (const m of new Set([...s.models, s.model])) api.createEl("option", { text: m, value: `api:${m}` });
-		const cc = this.modelSelect.createEl("optgroup", { attr: { label: "Claude Code (subscription)" } });
-		for (const m of new Set([...CC_MODELS, s.ccModel])) cc.createEl("option", { text: m ? `Claude Code · ${m}` : "Claude Code · default", value: `cc:${m}` });
-		if (![...this.modelSelect.options].some((o) => o.value === this.model)) {
-			const [kind, id] = splitChoice(this.model);
-			(kind === "api" ? api : cc).createEl("option", { text: id, value: this.model });
-		}
-		this.modelSelect.value = this.model;
-	}
-
-	private iconButton(parent: HTMLElement, icon: string, label: string, onClick: (e: MouseEvent) => void) {
-		const b = parent.createDiv({ cls: "clickable-icon", attr: { "aria-label": label } });
-		setIcon(b, icon);
-		b.onclick = onClick;
-		return b;
-	}
+	/** Settings changed: nothing to redraw since the model lives there. */
+	fillModels() {}
 
 	private autosize() {
 		this.inputEl.style.height = "auto";
@@ -361,7 +350,7 @@ export class ChatView extends ItemView {
 		this.abort?.abort();
 	}
 
-	private newChat() {
+	newChat() {
 		this.stop();
 		const hadMessages = this.messages.length > 0;
 		if (hadMessages) void this.persist();
@@ -371,7 +360,7 @@ export class ChatView extends ItemView {
 		this.created = Date.now();
 		this.renderMessages();
 		this.setStatus("");
-		if (hadMessages) new Notice("New chat. The previous one is in the history (clock icon).");
+		if (hadMessages) new Notice("New chat. The previous one is in the history (command: Zotero AI: Chat history, or right-click the pane).");
 	}
 
 	/* ------------------------------ history ------------------------------ */
@@ -408,8 +397,6 @@ export class ChatView extends ItemView {
 		this.stop();
 		this.chatId = rec.id;
 		this.created = rec.created;
-		this.model = rec.model || this.model;
-		this.fillModels();
 		this.messages = rec.messages.map((m) => ({ ...m }));
 		this.ccSession = rec.ccSession;
 		this.docs = [];
@@ -424,49 +411,49 @@ export class ChatView extends ItemView {
 		}
 	}
 
-	private async showHistory(e: MouseEvent) {
-		const menu = new Menu();
-		const chats = (await this.plugin.chats.list()).slice(0, 30);
-		if (chats.length === 0) menu.addItem((i) => i.setTitle("No saved chats yet").setDisabled(true));
-		for (const c of chats) {
-			menu.addItem((i) =>
-				i
-					.setTitle(`${c.title}  ·  ${window.moment(c.updated).fromNow()}`)
-					.setChecked(c.id === this.chatId)
-					.onClick(async () => {
-						if (c.id === this.chatId) return;
-						await this.persist();
-						const rec = await this.plugin.chats.load(c.id);
-						if (rec) await this.openRecord(rec);
-					}),
-			);
-		}
+	/** The pane's right-click menu (also what the commands do). */
+	addChatMenuItems(menu: Menu) {
+		menu.addItem((i) => i.setTitle("New chat").setIcon("plus").onClick(() => this.newChat()));
+		menu.addItem((i) => i.setTitle("Chat history…").setIcon("history").onClick(() => this.showHistory()));
+		menu.addItem((i) => i.setTitle("Save chat as note").setIcon("file-down").onClick(() => void this.saveAsNote()));
 		menu.addSeparator();
-		menu.addItem((i) =>
-			i.setTitle("Recover Claude Code chats…").setIcon("rotate-ccw").onClick(() => void this.recoverClaudeCode()),
-		);
+		menu.addItem((i) => i.setTitle("Recover Claude Code chats").setIcon("rotate-ccw").onClick(() => void this.recoverClaudeCode()));
 		if (this.messages.length) {
-			menu.addItem((i) =>
-				i.setTitle("Delete this chat").setIcon("trash-2").onClick(async () => {
-					await this.plugin.chats.remove(this.chatId);
-					this.messages = [];
-					this.ccSession = null;
-					this.chatId = newChatId();
-					this.renderMessages();
-				}),
-			);
+			menu.addItem((i) => i.setTitle("Delete this chat").setIcon("trash-2").onClick(() => void this.deleteChat()));
 		}
-		menu.showAtMouseEvent(e);
+	}
+
+	showHistory() {
+		new HistoryPicker(this.app, this.plugin.chats, this.chatId, async (id) => {
+			if (id === this.chatId) return;
+			await this.persist();
+			const rec = await this.plugin.chats.load(id);
+			if (rec) await this.openRecord(rec);
+		}).open();
+	}
+
+	private async deleteChat() {
+		await this.plugin.chats.remove(this.chatId);
+		this.messages = [];
+		this.ccSession = null;
+		this.chatId = newChatId();
+		this.renderMessages();
 	}
 
 	/** Chats that ran through Claude Code: its own session files, turned into history entries. */
-	private async recoverClaudeCode() {
+	async recoverClaudeCode(quiet = false) {
 		const known = new Set(
 			(await Promise.all((await this.plugin.chats.list()).map((c) => this.plugin.chats.load(c.id))))
 				.map((r) => r?.ccSession?.id)
 				.filter(Boolean),
 		);
-		const sessions = listClaudeCodeSessions().filter((s) => !known.has(s.id));
+		let sessions: ReturnType<typeof listClaudeCodeSessions> = [];
+		try {
+			sessions = listClaudeCodeSessions().filter((s) => !known.has(s.id));
+		} catch (e) {
+			if (!quiet) new Notice(`Could not read Claude Code's sessions: ${(e as Error).message}`);
+			return;
+		}
 		let added = 0;
 		for (const s of sessions) {
 			const messages = readClaudeCodeSession(s.file);
@@ -484,7 +471,9 @@ export class ChatView extends ItemView {
 			});
 			added++;
 		}
-		new Notice(added ? `${added} Claude Code chat${added === 1 ? "" : "s"} recovered: see the history.` : "No Claude Code chats found that are not in the history already.");
+		if (added || !quiet) {
+			new Notice(added ? `${added} Claude Code chat${added === 1 ? "" : "s"} recovered into the history.` : "No Claude Code chats found that are not in the history already.");
+		}
 	}
 
 	private setStatus(text: string) {
@@ -698,7 +687,7 @@ export class ChatView extends ItemView {
 
 	/* ------------------------------- export ------------------------------ */
 
-	private async saveAsNote() {
+	async saveAsNote() {
 		if (this.messages.length === 0) return void new Notice("Nothing to save yet.");
 		const s = this.plugin.settings;
 		const folder = normalizePath(s.chatFolder || "/");
@@ -729,12 +718,6 @@ export class ChatView extends ItemView {
 		if (file instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(file);
 	}
 
-	/** Header menu: same actions, for narrow panes. */
-	onPaneMenu(menu: Menu, source: string) {
-		super.onPaneMenu(menu, source);
-		menu.addItem((i) => i.setTitle("Save chat as note").setIcon("file-down").onClick(() => void this.saveAsNote()));
-		menu.addItem((i) => i.setTitle("New chat").setIcon("square-pen").onClick(() => this.newChat()));
-	}
 }
 
 function splitChoice(choice: string): ["api" | "cc", string] {

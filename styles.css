@@ -8,19 +8,17 @@
 	--zai-fade: 120ms ease-out;
 }
 
-.zai-head {
-	display: flex;
-	align-items: center;
-	gap: var(--size-4-1);
-	padding: var(--size-4-2) var(--size-4-3);
-	border-bottom: 1px solid var(--background-modifier-border);
+/* No view header (title, back/forward, ⋮) above the chat: commands and the
+   right-click menu do that work. */
+.workspace-leaf-content[data-type="zotero-ai-chat"] > .view-header {
+	display: none;
 }
-.zai-spacer {
-	flex: 1;
-}
-.zai-model {
-	max-width: 60%;
-	font-size: var(--font-ui-small);
+
+/* No tab bar when the chat is alone in its tab group (setting). */
+body.zai-hide-tabbar
+	.workspace-tabs:has(> .workspace-tab-container > .workspace-leaf:only-child > .workspace-leaf-content[data-type="zotero-ai-chat"])
+	> .workspace-tab-header-container {
+	display: none;
 }
 
 /* Context chips */

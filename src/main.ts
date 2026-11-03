@@ -31,6 +31,16 @@ export default class ZoteroAiPlugin extends Plugin {
 			},
 		});
 
+		const withChat = (fn: (v: ChatView) => unknown) => async () => {
+			const v = await this.openChat();
+			if (v) fn(v);
+		};
+		this.addCommand({ id: "new-chat", name: "New chat", callback: withChat((v) => v.newChat()) });
+		this.addCommand({ id: "chat-history", name: "Chat history", callback: withChat((v) => v.showHistory()) });
+		this.addCommand({ id: "save-chat", name: "Save chat as note", callback: withChat((v) => void v.saveAsNote()) });
+		this.addCommand({ id: "recover-claude-code", name: "Recover Claude Code chats", callback: withChat((v) => void v.recoverClaudeCode()) });
+		this.applyChrome();
+
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
 				const t = leaf ? targetOfLeaf(this, leaf) : null;
@@ -46,6 +56,15 @@ export default class ZoteroAiPlugin extends Plugin {
 
 	onunload() {
 		closeDb();
+		document.body.removeClass("zai-hide-tabbar");
+	}
+
+	/** Without a tab bar above a chat that is alone in its tab group (setting). */
+	applyChrome() {
+		document.body.toggleClass("zai-hide-tabbar", this.settings.hideTabBar);
+		this.registerEvent(
+			this.app.workspace.on("window-open", (win) => win.doc.body.toggleClass("zai-hide-tabbar", this.settings.hideTabBar)),
+		);
 	}
 
 	/** What the user is reading: the active leaf, else the last one that was. */
@@ -91,6 +110,8 @@ export default class ZoteroAiPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		document.body.toggleClass("zai-hide-tabbar", this.settings.hideTabBar);
+		for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) leaf.view.containerEl.doc.body.toggleClass("zai-hide-tabbar", this.settings.hideTabBar);
 		for (const v of this.chatViews()) v.fillModels();
 	}
 }

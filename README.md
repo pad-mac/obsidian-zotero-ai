@@ -5,7 +5,7 @@ Zotero library. It works alongside **ZotFlow Evo** (`pad-mac/zotflow-evo`):
 it reads ZotFlow's database for the items and your annotations, and finds the
 files on this computer by itself. Claude Desktop does not need to run.
 
-Two ways to get answers, switchable per chat in the model menu:
+Two ways to get answers, chosen in the settings (with the model):
 
 - **API key:** billed per use in the Claude Console, separately from a
   Claude plan (Max and Ultra include monthly API credits).
@@ -37,9 +37,10 @@ Desktop only, because it reads files from Zotero's folders.
   reader at that page, in the pane and in saved notes.
 - **Chats are kept**, each as a JSON file in the plugin's folder
   (`.obsidian/plugins/zotero-ai/chats/`), saved after every answer. The
-  clock icon lists them; "+" starts a new chat and the old one stays in the
-  history. The pane reopens the last chat after a restart. "Recover Claude
-  Code chats…" reads back chats from Claude Code's own session files
+  commands "New chat", "Chat history", "Save chat as note" and "Recover
+  Claude Code chats" (also in the pane's right-click menu) replace any
+  buttons. New chat keeps the old one in the history. The pane reopens the last chat after a restart. On opening, it
+  also reads back chats from Claude Code's own session files
   (`~/.claude/projects/*obsidian-zotero-ai*/`), including ones from before
   the history existed. Those can be continued, since the session holds the
   documents.
@@ -48,6 +49,14 @@ Desktop only, because it reads files from Zotero's folders.
 - Documents are marked for prompt caching, so follow-up questions within a few
   minutes are much cheaper. Each answer shows its tokens (in, cached, out) on
   hover.
+
+## The pane
+
+No header, no buttons: the model is set in the settings, and the actions are
+commands and the right-click menu. The tab bar above the chat is hidden when
+the chat is the only tab in its pane or window (setting). In a separate
+window that is also the title bar, so move it with Win+arrow keys and close
+it with Ctrl+W.
 
 ## Claude Code backend
 

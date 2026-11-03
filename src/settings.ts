@@ -28,6 +28,8 @@ export interface ZoteroAiSettings {
 	ccModel: string;
 	/** The chat the pane shows on opening. */
 	lastChatId: string;
+	/** Hide the tab bar above the chat when it is the only tab in its group. */
+	hideTabBar: boolean;
 }
 
 export const CC_MODELS = ["", "opus", "sonnet", "haiku", "fable"];
@@ -48,6 +50,7 @@ export const DEFAULT_SETTINGS: ZoteroAiSettings = {
 	claudePath: "",
 	ccModel: "",
 	lastChatId: "",
+	hideTabBar: true,
 };
 
 export const SECRET_ID = "zotero-ai-anthropic-key";
@@ -231,6 +234,16 @@ export class ZoteroAiSettingTab extends PluginSettingTab {
 					await save();
 				});
 			});
+
+		new Setting(containerEl)
+			.setName("Hide the tab bar above the chat")
+			.setDesc("When the chat is the only tab in its pane or window. In a separate window that also hides its title bar: move it with Win+arrow keys, close it with Ctrl+W.")
+			.addToggle((t) =>
+				t.setValue(s.hideTabBar).onChange(async (v) => {
+					s.hideTabBar = v;
+					await save();
+				}),
+			);
 
 		new Setting(containerEl)
 			.setName("Folder for saved chats")
