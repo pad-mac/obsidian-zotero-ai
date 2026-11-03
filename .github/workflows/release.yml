@@ -1,0 +1,58 @@
+# Builds a release for BRAT whenever manifest.json on main carries a version
+# that has no release yet. The tag is created by the workflow, so nobody has
+# to push tags by hand.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [manifest.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: v
+        run: echo "version=$(jq -r .version manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if released
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.exists.outputs.released == 'false'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build
+        if: steps.exists.outputs.released == 'false'
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Publish
+        if: steps.exists.outputs.released == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          flags=""
+          case "$v" in *-*) flags="--prerelease";; esac
+          gh release create "$v" main.js manifest.json styles.css \
+            --target "$GITHUB_SHA" --title "$v" --generate-notes $flags

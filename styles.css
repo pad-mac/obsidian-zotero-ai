@@ -1,0 +1,284 @@
+/* Zotero AI — chat pane. Theme variables only; short, snappy fades. */
+
+.zai {
+	display: flex;
+	flex-direction: column;
+	padding: 0 !important;
+	--zai-gap: var(--size-4-2);
+	--zai-fade: 120ms ease-out;
+}
+
+.zai-head {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	padding: var(--size-4-2) var(--size-4-3);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.zai-spacer {
+	flex: 1;
+}
+.zai-model {
+	max-width: 60%;
+	font-size: var(--font-ui-small);
+}
+
+/* Context chips */
+.zai-context {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	padding: var(--size-4-2) var(--size-4-3);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.zai-chip {
+	padding: var(--size-4-1) var(--size-4-2);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	animation: zai-in var(--zai-fade);
+}
+.zai-chip.is-error {
+	background: rgba(var(--color-red-rgb), 0.08);
+}
+.zai-chip-top {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-1);
+}
+.zai-chip-icon {
+	display: flex;
+	color: var(--text-muted);
+}
+.zai-chip-icon svg {
+	width: 14px;
+	height: 14px;
+}
+.zai-chip-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+}
+.zai-chip-x {
+	padding: 2px;
+	opacity: 0;
+	transition: opacity var(--zai-fade);
+}
+.zai-chip:hover .zai-chip-x {
+	opacity: 1;
+}
+.zai-chip-meta,
+.zai-chip-warn {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding-left: 18px;
+}
+.zai-chip-warn {
+	color: var(--text-warning);
+}
+.zai-chip-controls {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) 0 0 18px;
+}
+.zai-seg {
+	display: inline-flex;
+	border-radius: var(--radius-s);
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+}
+.zai-seg button {
+	height: auto;
+	padding: 1px 8px;
+	border-radius: 0;
+	box-shadow: none;
+	background: transparent;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	transition: background var(--zai-fade), color var(--zai-fade);
+}
+.zai-seg button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+.zai-pages {
+	flex: 1;
+	min-width: 0;
+	height: auto !important;
+	padding: 1px 6px !important;
+	font-size: var(--font-ui-smaller) !important;
+}
+.zai-context-actions {
+	display: flex;
+	gap: var(--size-4-3);
+}
+.zai-link-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: auto;
+	padding: 2px 0;
+	background: none !important;
+	box-shadow: none !important;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	transition: color var(--zai-fade);
+}
+.zai-link-btn:hover {
+	color: var(--text-normal);
+}
+.zai-link-btn svg {
+	width: 13px;
+	height: 13px;
+}
+
+/* Messages */
+.zai-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: var(--size-4-3);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+	user-select: text;
+}
+.zai-msg {
+	animation: zai-in var(--zai-fade);
+}
+.zai-user {
+	align-self: flex-end;
+	max-width: 85%;
+	padding: var(--size-4-2) var(--size-4-3);
+	border-radius: var(--radius-l);
+	background: var(--background-modifier-hover);
+	white-space: pre-wrap;
+}
+.zai-assistant .zai-body > :first-child {
+	margin-top: 0;
+}
+.zai-assistant .zai-body > :last-child {
+	margin-bottom: 0;
+}
+.zai-assistant.is-streaming .zai-body:empty::after {
+	content: "…";
+	color: var(--text-faint);
+}
+.zai-foot {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--size-4-2);
+	margin-top: var(--size-4-1);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	opacity: 0;
+	transition: opacity var(--zai-fade);
+}
+.zai-msg:hover .zai-foot {
+	opacity: 1;
+}
+.zai-foot .clickable-icon {
+	padding: 2px;
+}
+.zai-error {
+	margin-top: var(--size-4-1);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-error);
+}
+
+.zai-empty {
+	margin: auto;
+	text-align: center;
+	animation: zai-in var(--zai-fade);
+}
+.zai-empty-title {
+	color: var(--text-muted);
+	margin-bottom: var(--size-4-3);
+}
+.zai-quick {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--size-4-2);
+}
+.zai-quick button {
+	font-size: var(--font-ui-small);
+}
+
+/* Composer */
+.zai-composer {
+	padding: var(--size-4-2) var(--size-4-3) var(--size-4-3);
+	border-top: 1px solid var(--background-modifier-border);
+}
+.zai-status {
+	height: 0;
+	overflow: hidden;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	opacity: 0;
+	transition: opacity var(--zai-fade);
+}
+.zai-status.is-visible {
+	height: auto;
+	margin-bottom: var(--size-4-1);
+	opacity: 1;
+}
+.zai-input-row {
+	display: flex;
+	align-items: flex-end;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) var(--size-4-1) var(--size-4-1) var(--size-4-3);
+	border-radius: var(--radius-l);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	transition: border-color var(--zai-fade);
+}
+.zai-input-row:focus-within {
+	border-color: var(--interactive-accent);
+}
+.zai-input {
+	flex: 1;
+	resize: none;
+	border: none !important;
+	box-shadow: none !important;
+	background: transparent !important;
+	padding: 6px 0 !important;
+	min-height: 0;
+	max-height: 220px;
+	font-size: var(--font-ui-medium);
+	line-height: 1.4;
+}
+.zai-send {
+	flex: none;
+	width: 30px;
+	height: 30px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: var(--interactive-accent) !important;
+	color: var(--text-on-accent) !important;
+	transition: filter var(--zai-fade);
+}
+.zai-send:hover {
+	filter: brightness(1.08);
+}
+
+/* Item picker */
+.zai-suggest-meta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+@keyframes zai-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
