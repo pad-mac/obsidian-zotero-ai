@@ -53,10 +53,7 @@ Desktop only, because it reads files from Zotero's folders.
 ## The pane
 
 No header, no buttons: the model is set in the settings, and the actions are
-commands and the right-click menu. The tab bar above the chat is hidden when
-the chat is the only tab in its pane or window (setting). In a separate
-window that is also the title bar, so move it with Win+arrow keys and close
-it with Ctrl+W.
+commands and the right-click menu. The tab bar stays.
 
 ## Claude Code backend
 

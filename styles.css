@@ -14,13 +14,6 @@
 	display: none;
 }
 
-/* No tab bar when the chat is alone in its tab group (setting). */
-body.zai-hide-tabbar
-	.workspace-tabs:has(> .workspace-tab-container > .workspace-leaf:only-child > .workspace-leaf-content[data-type="zotero-ai-chat"])
-	> .workspace-tab-header-container {
-	display: none;
-}
-
 /* Context chips */
 .zai-context {
 	display: flex;
